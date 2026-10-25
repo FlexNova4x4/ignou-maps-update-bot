@@ -343,18 +343,21 @@ def scan_websites(force_summary: bool = False) -> tuple[int, int, list[Item]]:
 
     if baseline and not errors:
         mark_baseline_done()
-        telegram_send(
-            "IGNOU MAPS Update Bot started.\n"
-            "Initial website scan complete; existing links were saved as baseline, so old notices will not be spammed.\n"
-            "Use /check to get a current snapshot, /status to see bot status.\n"
-            f"Check interval: {CHECK_INTERVAL // 60} minutes."
-        )
+        if not force_summary:
+            telegram_send(
+                "IGNOU MAPS Update Bot started.\n"
+                "Initial website scan complete; existing links were saved as baseline, so old notices will not be spammed.\n"
+                "Use /check to get a current snapshot, /status to see bot status.\n"
+                f"Check interval: {CHECK_INTERVAL // 60} minutes."
+            )
     elif baseline and errors:
         # Keep baseline mode active until every source can be fetched; this prevents
         # an unavailable site from flooding the chat with old links on the next run.
         print("Initial scan incomplete; will retry baseline without alerting old links.")
-    elif force_summary:
-        # Send a manageable snapshot from the official pages; avoid flooding Telegram.
+
+    # Always respond to /check, even while initial baseline setup is incomplete.
+    # Previously, the baseline branches skipped this summary, making /check look stuck.
+    if force_summary:
         summary_items: list[Item] = []
         used: set[str] = set()
         for item in all_items:
@@ -363,18 +366,29 @@ def scan_websites(force_summary: bool = False) -> tuple[int, int, list[Item]]:
                 summary_items.append(item)
             if len(summary_items) >= 10:
                 break
+
         if summary_items:
-            header = "IGNOU MAPS — current matching links\n\n"
+            header = "IGNOU MAPS — scan complete; current matching links:\n\n"
             body = "\n\n────────────\n\n".join(format_item(item, "CURRENT") for item in summary_items)
-            # Keep each Telegram message comfortably below Telegram's message limit.
             message = header + body
+            if errors:
+                message += "\n\nSome sources could not be checked:\n" + "\n".join(errors[:5])
+            # Keep each Telegram message comfortably below Telegram's message limit.
             if len(message) <= 3800:
                 telegram_send(message)
             else:
                 telegram_send(header + "\n\n".join(format_item(item, "CURRENT") for item in summary_items[:4]))
                 telegram_send("More current links are available on the official source pages listed in /status.")
+                if errors:
+                    telegram_send("Some sources could not be checked:\n" + "\n".join(errors[:5]))
         else:
-            telegram_send("No matching links were found in this scan. The source sites may be temporarily unavailable or their page layout may have changed.")
+            message = (
+                "IGNOU MAPS scan finished, but no matching links were extracted. "
+                "The source sites may be temporarily unavailable or their page layout may have changed."
+            )
+            if errors:
+                message += "\n\nSources with errors:\n" + "\n".join(errors[:5])
+            telegram_send(message[:3900])
 
     if errors:
         print(f"Scan finished with {len(errors)} source error(s).")
